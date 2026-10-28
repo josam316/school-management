@@ -2,10 +2,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>School management</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<title>EDUNEXUS School Manager</title>
 <style>
 :root{
   --bg:#F2F5F9;--surface:#FFFFFF;--ink:#16233A;--muted:#58677D;--line:#DCE3EC;
@@ -163,6 +160,15 @@ select{width:auto;max-width:100%}
 .alist button[aria-current="true"]{border-color:var(--ink);box-shadow:inset 3px 0 0 var(--accent)}
 .alist small{color:var(--muted)}
 .score{width:6.5rem;text-align:right}
+.bulk-grade-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.8rem}
+.bulk-grade-grid{max-height:min(52vh,540px);overflow:auto;border:1px solid var(--line);border-radius:10px}
+.bulk-grade-grid .tbl{min-width:max-content;margin:0}
+.bulk-grade-grid .tbl th{position:sticky;top:0;z-index:1;background:var(--surface)}
+.bulk-grade-grid .tbl td:first-child,.bulk-grade-grid .tbl th:first-child{position:sticky;left:0;background:var(--surface);z-index:2}
+.bulk-grade-grid .tbl th:first-child{z-index:3}
+.bulk-score{width:5.5rem;min-width:5.5rem;text-align:right}
+dialog.wide{width:min(1120px,calc(100vw - 1.5rem))}
+@media (max-width:700px){.bulk-grade-meta{grid-template-columns:1fr}.bulk-score{width:4.5rem;min-width:4.5rem}}
 
 /* forms and dialog */
 .fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.9rem}
@@ -215,6 +221,14 @@ dialog::backdrop{background:rgba(10,17,30,.55)}
   .split{grid-template-columns:1fr}
   .fields{grid-template-columns:1fr}
 }
+@media print{
+  body{background:#fff!important;color:#111!important;font-size:11pt}
+  .side,.ph-act,.tools,.w,button,.btn,#toast,.banner{display:none!important}
+  .app{display:block!important}main{max-width:none!important;padding:0!important}
+  .panel,.tw,.facts,.ccard{box-shadow:none!important;break-inside:avoid;border-color:#bbb!important}
+  .tbl{min-width:0!important;font-size:9pt}.tbl th,.tbl td{padding:5px!important}
+  .panel{margin-bottom:10px!important}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -230,12 +244,26 @@ dialog::backdrop{background:rgba(10,17,30,.55)}
       <div class="side-foot" id="sfoot"></div>
     </div>
   </aside>
-  <main id="main" tabindex="-1"></main>
+  <main id="main" tabindex="-1"><section style="max-width:760px;margin:48px auto;padding:24px;background:#fff;color:#16233A;border:1px solid #DCE3EC;border-radius:16px;font:16px/1.5 system-ui,sans-serif"><h1 style="margin-top:0">EDUNEXUS School Manager</h1><p>Starting the application…</p><p>If this message remains visible, JavaScript may be blocked or the application encountered a startup error. Refresh the page or open this file in a current version of Chrome or Edge.</p></section></main>
 </div>
 <dialog id="dlg"><div id="dlg-body"></div></dialog>
 <div id="toast" role="status" aria-live="polite"></div>
 
+<script src="./supabase-config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+window.addEventListener('error',function(ev){
+  try{
+    const m=document.getElementById('main');
+    if(m){
+      const msg=(ev&&ev.message)||'An unexpected startup error occurred.';
+      m.innerHTML='<section style="max-width:820px;margin:32px auto;padding:24px;background:#fff;color:#16233A;border:1px solid #DCE3EC;border-radius:16px;font:16px/1.5 system-ui,sans-serif"><h1>EDUNEXUS could not start</h1><p>The page encountered a JavaScript error instead of loading the dashboard.</p><p><b>Error:</b> '+String(msg).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})+'</p><p>Try opening this file in an updated Chrome or Edge browser. Your saved school data has not been cleared by this diagnostic screen.</p><button onclick="location.reload()" style="padding:10px 16px;border:0;border-radius:8px;background:#2457D6;color:#fff;font-weight:600;cursor:pointer">Reload application</button></section>';
+    }
+  }catch(ignore){}
+});
+window.addEventListener('unhandledrejection',function(ev){
+  try{const m=document.getElementById('main');if(m&&!m.textContent.trim())m.innerHTML='<section style="margin:32px auto;padding:24px;background:#fff;color:#16233A;border-radius:16px;font:16px/1.5 system-ui,sans-serif"><h1>EDUNEXUS could not finish loading</h1><p>A background operation failed. Reload the application and try again.</p></section>';}catch(ignore){}
+});
 (function(){
 'use strict';
 
@@ -255,12 +283,13 @@ const genId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const letter=p=>p>=80?'A':p>=70?'B':p>=60?'C':p>=50?'D':p>=40?'E':'F';
 
 /* ---------- state ---------- */
-const COLS=['students','teachers','classes','attendance','grades','fees','notices'];
-const S={students:[],teachers:[],classes:[],attendance:[],grades:[],fees:[],notices:[],
-  settings:{schoolName:'My school',term:'Term 1',currency:'$',passMark:50},accounts:[]};
+const COLS=['students','teachers','classes','attendance','grades','fees','notices','timetable','events','expenses'];
+const S={students:[],teachers:[],classes:[],attendance:[],grades:[],fees:[],notices:[],timetable:[],events:[],expenses:[],
+  settings:{schoolName:'My school',term:'Term 1',currency:'UGX',passMark:50},accounts:[]};
 const ui={view:'overview',mode:'connecting',loaded:{},slow:false,canWrite:true,dl:null,busy:false,role:'admin',me:'',uid:null,access:[],profiles:{},share:'admin',acct:null,loginTab:'username',loginId:'',fails:0,lockUntil:0,gateDone:null,
   sq:'',sclass:'',attClass:'',attDate:todayStr(),attDraft:null,
-  grClass:'',grTab:'assess',grAssess:'',grDraft:null,fq:'',fowing:false};
+  grClass:'',grTab:'assess',grAssess:'',grDraft:null,fq:'',fowing:false,
+  authUser:null,schoolId:null,joinCode:'',authTab:'login',cloudReady:false,cloudStatus:'',authError:'',authGeneration:0};
 const cls=id=>by(S.classes,id), stu=id=>by(S.students,id);
 const className=id=>{const c=cls(id);return c?c.name:'No class'};
 const money=n=>{const c=S.settings.currency||'';const v=Math.abs(Math.round(n*100)/100).toLocaleString();return (n<0?'\u2212':'')+c+(c.length>1&&!/\s$/.test(c)?' ':'')+v};
@@ -293,28 +322,91 @@ const localBackend={
   async saveSettings(v){Object.assign(S.settings,v);lsSave();scheduleRender()},
   async wipe(){COLS.forEach(c=>S[c]=[]);lsSave();scheduleRender()}
 };
-function dbBackend(db){
-  const wait=ms=>new Promise(r=>setTimeout(r,ms));
-  const retry=async fn=>{for(let a=0;;a++){try{return await fn()}catch(e){
-    if(a<3&&e&&(e.code==='unavailable'||e.code==='resource_exhausted')){await wait(400*(a+1)+Math.random()*300);continue}throw e}}};
-  return{
-    async put(col,obj){const rest=Object.assign({},obj);const id=rest.id;delete rest.id;
-      const ref=id?db.collection(col).doc(id):db.collection(col).doc();await retry(()=>ref.set(rest));return ref.id},
-    async remove(col,id){await retry(()=>db.collection(col).doc(id).delete())},
-    async saveSettings(v){await retry(()=>db.doc('settings/main').set(Object.assign({},S.settings,v)))},
-    async wipe(){for(const c of COLS){const snap=await db.collection(c).get();
-      for(const d of snap.docs){await retry(()=>db.collection(c).doc(d.id).delete())}}},
-    watchAccess(){db.collection('access').onSnapshot(snap=>{ui.access=snap.docs.map(d=>Object.assign({},d.data(),{id:d.id}));loadProfiles();scheduleRender()},dbErr)},
-    async signIn(uid){await retry(()=>db.doc('access/'+uid).set({at:Date.now(),role:ui.role}))},
-    subscribe(){
-      COLS.forEach(c=>db.collection(c).onSnapshot(snap=>{
-        S[c]=snap.docs.map(d=>Object.assign({},d.data(),{id:d.id}));ui.loaded[c]=true;scheduleRender()},dbErr));
-      db.collection('accounts').onSnapshot(snap=>{S.accounts=snap.docs.map(d=>Object.assign({},d.data(),{id:d.id}));ui.loaded.accounts=true;restoreSession();scheduleRender()},dbErr);
-      db.doc('settings/main').onSnapshot(s=>{if(s.exists)Object.assign(S.settings,s.data());scheduleRender()},dbErr)}
-  };
-}
+let supabaseClient=null;
+let realtimeChannel=null;
 let backend=localBackend;
 let userNs=null;
+const cloudCollections=new Set(COLS);
+const defaultSchoolSettings={schoolName:'My school',term:'Term 1',currency:'UGX',passMark:50};
+function unwrapSupabase(result){if(result&&result.error)throw result.error;return result?result.data:null}
+function clearCloudData(){COLS.forEach(c=>{S[c]=[];ui.loaded[c]=true});S.accounts=[];ui.loaded.accounts=true;Object.assign(S.settings,defaultSchoolSettings);ui.schoolId=null;ui.joinCode='';ui.canWrite=false;}
+function memberToAccount(m){return {id:m.user_id,name:m.display_name||m.email||'School user',username:m.username||'',email:m.email||'',role:m.role||'teacher',disabled:!!m.disabled,createdAt:m.created_at?Date.parse(m.created_at):Date.now()}}
+function supabaseBackend(client){
+  let schoolId=null;
+  async function refreshCollection(col){
+    if(!cloudCollections.has(col)||!schoolId)return;
+    const {data,error}=await client.from('school_records').select('record_id,data').eq('school_id',schoolId).eq('collection',col).order('created_at',{ascending:true});
+    if(error)throw error;
+    S[col]=(data||[]).map(r=>Object.assign({},r.data||{},{id:r.record_id}));ui.loaded[col]=true;scheduleRender();
+  }
+  async function refreshMembers(){
+    if(!schoolId)return;
+    const {data,error}=await client.from('school_memberships').select('user_id,display_name,username,email,role,disabled,created_at').eq('school_id',schoolId).order('created_at',{ascending:true});
+    if(error)throw error;
+    S.accounts=(data||[]).map(memberToAccount);ui.loaded.accounts=true;
+    const own=S.accounts.find(a=>ui.authUser&&a.id===ui.authUser.id);
+    if(own){ui.acct=own;ui.role=own.role;ui.share=own.role;ui.canWrite=!own.disabled&&own.role!=='viewer';}
+    scheduleRender();
+  }
+  async function refreshSettings(){
+    if(!schoolId)return;
+    const {data,error}=await client.from('school_settings').select('data').eq('school_id',schoolId).maybeSingle();
+    if(error)throw error;
+    if(data&&data.data)Object.assign(S.settings,defaultSchoolSettings,data.data);
+    scheduleRender();
+  }
+  async function start(id){
+    schoolId=id;ui.schoolId=id;ui.loaded={};COLS.forEach(c=>ui.loaded[c]=false);ui.loaded.accounts=false;
+    if(realtimeChannel){try{await client.removeChannel(realtimeChannel)}catch(e){}realtimeChannel=null;}
+    await Promise.all([...COLS.map(refreshCollection),refreshMembers(),refreshSettings()]);
+    if(ui.role==='admin'){
+      try{const {data,error}=await client.rpc('get_school_join_code');if(error)throw error;ui.joinCode=data||'';}catch(e){console.warn('Could not load school join code',e);ui.joinCode='';}
+    } else ui.joinCode='';
+    realtimeChannel=client.channel('edunexus-school-'+id)
+      .on('postgres_changes',{event:'*',schema:'public',table:'school_records',filter:'school_id=eq.'+id},payload=>{
+        const col=(payload.new&&payload.new.collection)||(payload.old&&payload.old.collection);
+        if(cloudCollections.has(col))refreshCollection(col).catch(dbErr);
+      })
+      .on('postgres_changes',{event:'*',schema:'public',table:'school_settings',filter:'school_id=eq.'+id},()=>refreshSettings().catch(dbErr))
+      .on('postgres_changes',{event:'*',schema:'public',table:'school_memberships',filter:'school_id=eq.'+id},()=>refreshMembers().catch(dbErr))
+      .subscribe(status=>{ui.cloudStatus=status;if(status==='SUBSCRIBED')ui.cloudReady=true;scheduleRender();});
+    ui.cloudReady=true;scheduleRender();
+  }
+  return {
+    start,
+    async put(col,obj){
+      if(col==='accounts'){
+        if(!obj.id)throw new Error('New accounts must register and join with the school code first.');
+        const {data,error}=await client.rpc('admin_update_member',{p_user_id:obj.id,p_display_name:obj.name||null,p_username:obj.username||null,p_role:obj.role||'teacher',p_disabled:!!obj.disabled});
+        if(error)throw error;await refreshMembers();return obj.id;
+      }
+      if(!cloudCollections.has(col))throw new Error('Unsupported data section: '+col);
+      const id=obj.id||genId();const rec=Object.assign({},obj,{id});
+      const {error}=await client.from('school_records').upsert({school_id:schoolId,collection:col,record_id:id,data:rec},{onConflict:'school_id,collection,record_id'});
+      if(error)throw error;await refreshCollection(col);return id;
+    },
+    async remove(col,id){
+      if(col==='accounts'){
+        const {error}=await client.rpc('admin_remove_member',{p_user_id:id});if(error)throw error;await refreshMembers();return;
+      }
+      if(!cloudCollections.has(col))throw new Error('Unsupported data section: '+col);
+      const {error}=await client.from('school_records').delete().eq('school_id',schoolId).eq('collection',col).eq('record_id',id);
+      if(error)throw error;await refreshCollection(col);
+    },
+    async saveSettings(v){
+      const merged=Object.assign({},S.settings,v);
+      const {data,error}=await client.from('school_settings').update({data:merged,updated_at:new Date().toISOString()}).eq('school_id',schoolId).select('school_id').maybeSingle();
+      if(error)throw error;if(!data)throw new Error('No settings row was updated. Check administrator access.');
+      Object.assign(S.settings,merged);scheduleRender();
+    },
+    async wipe(){
+      const {error}=await client.from('school_records').delete().eq('school_id',schoolId);
+      if(error)throw error;await Promise.all(COLS.map(refreshCollection));
+    },
+    async refreshMembers(){return refreshMembers();},
+    async stop(){if(realtimeChannel){try{await client.removeChannel(realtimeChannel)}catch(e){}realtimeChannel=null;}}
+  };
+}
 async function loadProfiles(){
   if(!userNs)return;
   const ids=ui.access.map(a=>a.id).filter(i=>!(i in ui.profiles));
@@ -323,8 +415,8 @@ async function loadProfiles(){
 }
 function dbErr(e){if(e&&e.code==='revoked'){ui.canWrite=false;scheduleRender()}else if(window.console)console.warn('db',e)}
 const errMsg=e=>e&&e.code==='quota_exceeded'?'Storage is full. Delete some records and try again.':
-  e&&e.code==='invalid_argument'?'You don\u2019t have permission to change this data.':
-  'Couldn\u2019t save. Check your connection and try again.';
+  e&&(e.code==='42501'||e.code==='PGRST301'||e.status===401||e.status===403)?'You do not have permission to change this data. Check your account role.':
+  (e&&e.message?String(e.message):'Couldn’t save. Check your connection and try again.');
 async function run(fn,okMsg){
   if(!ui.canWrite){toast('You have view-only access.',true);return false}
   try{await fn();if(okMsg)toast(okMsg);return true}
@@ -335,7 +427,7 @@ async function run(fn,okMsg){
 let toastT=0;
 function toast(msg,isErr){const t=$('#toast');t.textContent=msg;t.className='show'+(isErr?' err':'');clearTimeout(toastT);toastT=setTimeout(()=>{t.className=''},3600)}
 function dlg(html){$('#dlg-body').innerHTML=html;const d=$('#dlg');if(!d.open)d.showModal()}
-function closeDlg(){const d=$('#dlg');if(d.open)d.close()}
+function closeDlg(){const d=$('#dlg');if(d.open)d.close();d.classList.remove('wide')}
 let pend=null;
 function confirmBox(title,msg,label){
   return new Promise(res=>{pend=res;
@@ -462,7 +554,7 @@ function vGrades(){
   if(!ui.grClass||!cls(ui.grClass))ui.grClass=S.classes.slice().sort(byName)[0].id;
   const c=cls(ui.grClass);
   const tabs=`<div class="tabs" role="tablist"><button role="tab" data-act="g-tab" data-tab="assess" aria-selected="${ui.grTab==='assess'}">Assessments</button><button role="tab" data-act="g-tab" data-tab="results" aria-selected="${ui.grTab==='results'}">Class results</button></div>`;
-  const top=head('Grades','Record scores and see how each class is doing.',`<select data-in="grClass" aria-label="Class">${classOptions(c.id)}</select>${btn('New assessment','g-new',{pri:1,w:1,sw:1})}`);
+  const top=head('Grades','Enter one subject at a time, or record all class subjects in a single grid.',`<select data-in="grClass" aria-label="Class">${classOptions(c.id)}</select>${btn('Enter marks for all subjects','g-bulk',{pri:1,w:1,sw:1,dis:!ui.canWrite})}${btn('New assessment','g-new',{w:1,sw:1,dis:!ui.canWrite})}`);
   return top+tabs+(ui.grTab==='results'?resultsTable(c):assessPane(c));
 }
 function assessPane(c){
@@ -492,7 +584,7 @@ function resultsTable(c){
   rows.sort((x,y)=>(x.pos||999)-(y.pos||999)||byName(x.s,y.s));
   const pm=S.settings.passMark;
   const cell=v=>v===undefined||v===null?'<span class="mut">\u2013</span>':`<span class="${v<pm?'bad':''}">${Math.round(v)}%</span>`;
-  return `<div class="tw"><table class="tbl"><thead><tr><th>Position</th><th>Student</th>${subs.map(x=>`<th class="r">${esc(x)}</th>`).join('')}<th class="r">Overall</th><th>Grade</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r.pos||'\u2013'}</td><td><button class="link" data-act="stu-open" data-id="${esc(r.s.id)}">${esc(r.s.name)}</button></td>${subs.map(x=>`<td class="r">${cell(r.a[x])}</td>`).join('')}<td class="r"><b>${cell(r.ov)}</b></td><td>${r.ov===null?'':'<b>'+letter(r.ov)+'</b>'}</td></tr>`).join('')}</tbody></table></div><p class="legend"><span>Each figure is the mean of that subject\u2019s assessment percentages. Marks below ${pm}% are shown in red.</span></p>`;
+  return `<div class="row" style="margin-bottom:.8rem">${ui.dl?btn('Download all report cards for this class','rc-class',{id:c.id}):''}</div><div class="tw"><table class="tbl"><thead><tr><th>Position</th><th>Student</th>${subs.map(x=>`<th class="r">${esc(x)}</th>`).join('')}<th class="r">Overall</th><th>Grade</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r.pos||'\u2013'}</td><td><button class="link" data-act="stu-open" data-id="${esc(r.s.id)}">${esc(r.s.name)}</button></td>${subs.map(x=>`<td class="r">${cell(r.a[x])}</td>`).join('')}<td class="r"><b>${cell(r.ov)}</b></td><td>${r.ov===null?'':'<b>'+letter(r.ov)+'</b>'}</td></tr>`).join('')}</tbody></table></div><p class="legend"><span>Each figure is the mean of that subject\u2019s assessment percentages. Marks below ${pm}% are shown in red.</span></p>`;
 }
 
 function vFees(){
@@ -516,19 +608,40 @@ function vNotices(){
   (rows.length?rows.map(n=>`<section class="panel"><div class="regbar" style="margin:0 0 .4rem"><div><h2>${esc(n.title)}</h2><small class="mut">${fmtDate(n.date)}, for ${esc((n.audience||'Everyone').toLowerCase())}</small></div><span class="w">${btn('Delete','notice-del',{id:n.id,sm:1})}</span></div><p style="white-space:pre-wrap">${esc(n.body)}</p></section>`).join(''):note('No notices yet','Post a notice and it will show on the overview.',btn('Post notice','notice-new',{pri:1,w:1})));
 }
 
+
+function vTimetable(){
+  const days=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const entries=S.timetable.slice().sort((a,b)=>days.indexOf(a.day)-days.indexOf(b.day)||(a.start||'').localeCompare(b.start||''));
+  const rows=entries.length?`<div class="tw"><table class="tbl"><thead><tr><th>Day</th><th>Time</th><th>Class</th><th>Subject</th><th>Teacher</th><th>Room</th><th></th></tr></thead><tbody>${entries.map(t=>`<tr><td>${esc(t.day)}</td><td>${esc(t.start)}–${esc(t.end)}</td><td>${esc(className(t.classId))}</td><td>${esc(t.subject)}</td><td>${esc((by(S.teachers,t.teacherId)||{}).name||'—')}</td><td>${esc(t.room||'—')}</td><td class="r"><span class="row w">${btn('Edit','tt-edit',{id:t.id,sm:1})}${btn('Delete','tt-del',{id:t.id,sm:1})}</span></td></tr>`).join('')}</tbody></table></div>`:note('No lessons scheduled','Add lessons to create a weekly timetable.',btn('Add lesson','tt-new',{pri:1,w:1}));
+  return head('Timetable','Manage weekly lessons, teachers, classes and rooms.',btn('Add lesson','tt-new',{pri:1,w:1}))+rows;
+}
+function vCalendar(){
+ const rows=S.events.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+ return head('School calendar','Track school events, deadlines, meetings and holidays.',btn('Add event','event-new',{pri:1,w:1}))+
+ (rows.length?rows.map(e=>`<section class="panel"><div class="regbar"><div><h2>${esc(e.title)}</h2><p class="mut">${fmtDate(e.date)} · ${esc(e.category||'Event')}${e.location?' · '+esc(e.location):''}</p></div><span class="row w">${btn('Edit','event-edit',{id:e.id,sm:1})}${btn('Delete','event-del',{id:e.id,sm:1})}</span></div><p style="white-space:pre-wrap">${esc(e.description||'')}</p></section>`).join(''):note('No events yet','Add the next school activity or important date.',btn('Add event','event-new',{pri:1,w:1})));
+}
+function vExpenses(){
+ const total=S.expenses.reduce((n,x)=>n+(Number(x.amount)||0),0);
+ const rows=S.expenses.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+ return head('Expenses','Record operational spending and keep a simple expense register.',btn('Record expense','expense-new',{pri:1,w:1}))+
+ `<div class="facts"><div class="fact"><span>Total recorded expenses</span><b>${money(total)}</b></div><div class="fact"><span>Entries</span><b>${rows.length}</b></div></div>`+
+ (rows.length?`<div class="tw"><table class="tbl"><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Paid to</th><th class="r">Amount</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${fmtDate(x.date)}</td><td>${esc(x.category)}</td><td>${esc(x.description)}</td><td>${esc(x.payee||'—')}</td><td class="r">${money(+x.amount||0)}</td><td class="r"><span class="row w">${btn('Edit','expense-edit',{id:x.id,sm:1})}${btn('Delete','expense-del',{id:x.id,sm:1})}</span></td></tr>`).join('')}</tbody></table></div>`:note('No expenses recorded','Record school running costs to start tracking spending.',btn('Record expense','expense-new',{pri:1,w:1})));
+}
+
 function vSettings(){
   const s=S.settings,shared=ui.mode==='shared',canExport=!!ui.dl&&S.students.length>0;
-  return head('Settings','School details and data.')+
+  return head('Settings','School details, data portability and backup.',btn('Print current page','print-page',{w:1}))+
   `<section class="panel"><h2>School details</h2><div class="fields grid2"><label class="fld"><span>School name</span><input id="set-name" value="${esc(s.schoolName)}"></label><label class="fld"><span>Current term</span><input id="set-term" value="${esc(s.term)}"></label><label class="fld"><span>Currency symbol or code</span><input id="set-cur" value="${esc(s.currency)}" placeholder="For example $ or EUR"></label><label class="fld"><span>Pass mark (%)</span><input id="set-pass" type="number" min="0" max="100" value="${esc(s.passMark)}"></label></div><div class="row" style="margin-top:1rem">${btn('Save settings','set-save',{pri:1,w:1})}</div></section>
-  <section class="panel"><h2>Data</h2><p class="mut" style="margin-bottom:1rem">${shared?'Records are stored in this page\u2019s shared database. People you share the page with as contributors can edit them; viewers can only read.':'Shared storage isn\u2019t available in this view, so records are saved in this browser only.'}</p><div class="row">${ui.dl?btn('Export students (CSV)','exp-students',{dis:!canExport}):''}${ui.dl?btn('Export fee ledger (CSV)','exp-fees',{dis:!S.fees.length}):''}${btn('Load sample data','sample',{w:1,dis:!!(S.students.length||S.classes.length)})}${btn('Clear all records','wipe',{w:1,dan:1})}</div>${(S.students.length||S.classes.length)?'<p class="mut" style="margin-top:.7rem"><small>Sample data can only be loaded into an empty school.</small></p>':''}</section>`+accessPanel();
+  <section class="panel"><h2>Data</h2><p class="mut" style="margin-bottom:1rem">${shared?'Records are stored in this page\u2019s shared database. People you share the page with as contributors can edit them; viewers can only read.':'Shared storage isn\u2019t available in this view, so records are saved in this browser only.'}</p><div class="row">${btn('Export students (CSV)','exp-students',{dis:!S.students.length})}${btn('Export fee ledger (CSV)','exp-fees',{dis:!S.fees.length})}${btn('Load sample data','sample',{w:1,dis:!!(S.students.length||S.classes.length)})}${btn('Download full backup','backup',{w:1})}${btn('Restore backup','restore',{w:1})}${btn('Clear all records','wipe',{w:1,dan:1})}</div>${(S.students.length||S.classes.length)?'<p class="mut" style="margin-top:.7rem"><small>Sample data can only be loaded into an empty school.</small></p>':''}</section>`+accessPanel();
 }
 function accessPanel(){
+  if(ui.mode!=='shared')return `<section class="panel"><h2>Cloud sync</h2><p class="mut">Cloud sync is not configured in this copy. Add your Supabase project URL and publishable key to <code>supabase-config.js</code>, then redeploy to Vercel.</p></section>`;
   const roleName=r=>r==='admin'?'Administrator':r==='teacher'?'Teacher':'Viewer';
-  const rows=ui.access.slice().sort((a,b)=>(b.at||0)-(a.at||0)).map(a=>`<tr><td>${esc(ui.profiles[a.id]||'Someone')}${a.id===ui.uid?' <small class="mut">(you)</small>':''}</td><td>${roleName(a.role)}</td><td>${a.at?new Date(a.at).toLocaleString():''}</td></tr>`).join('');
-  const hist=ui.mode!=='shared'?'<p class="mut">Sign-in history needs shared storage.</p>':rows?`<div class="tw"><table class="tbl" style="min-width:420px"><thead><tr><th>Person</th><th>Role</th><th>Last signed in</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="mut">No sign-ins recorded yet.</p>';
-  return `<section class="panel"><h2>Sign-in and access</h2><p class="mut" style="margin-bottom:1rem">Everyone signs in with their Claude account, and only people you invite can open this page. What each person can do depends on the access level you give them in the page’s Share menu. Keep general access restricted so nobody can open the page without being invited.</p><div class="tw"><table class="tbl" style="min-width:520px"><thead><tr><th>Share level</th><th>Role</th><th>What they can do</th></tr></thead><tbody><tr><td>Owner or Editor</td><td>Administrator</td><td>Everything, including fees, settings and sign-in history</td></tr><tr><td>Contributor</td><td>Teacher</td><td>See students, classes and grades; take registers and enter scores. Fee records stay hidden.</td></tr><tr><td>Viewer or Commenter</td><td>Viewer</td><td>Read notices only</td></tr></tbody></table></div><h3>Recent sign-ins</h3>${hist}</section>`;
+  const rows=ui.access.slice().map(a=>`<tr><td>${esc(ui.profiles[a.id]||'School member')}${a.id===ui.uid?' <small class="mut">(you)</small>':''}</td><td>${roleName(a.role)}</td><td>${a.at?new Date(a.at).toLocaleString():''}</td></tr>`).join('');
+  const join=ui.role==='admin'?`<div class="panel" style="margin-top:1rem"><h3>Invite staff to EDUNEXUS</h3><p class="mut">Share this school code only with people who should join this school. They must create their own account, sign in, and use the code to join. New members start with Teacher access; you can change their role in Users.</p><div class="row"><code style="padding:.6rem .8rem;border:1px solid var(--line);border-radius:8px;font-weight:800;letter-spacing:.12em">${esc(ui.joinCode||'Loading…')}</code>${ui.joinCode?btn('Copy school code','copy-join-code',{pri:1}):''}</div></div>`:'';
+  return `<section class="panel"><h2>Cloud storage and access</h2><p class="mut">School records are stored in Supabase PostgreSQL. Signed-in school members see the same records across devices. Database policies enforce tenant and role access; the page alone is not the security boundary.</p><p class="mut">Connection status: <b>${esc(ui.cloudStatus||'Connecting')}</b></p>${join}<h3>School members</h3>${rows?`<div class="tw"><table class="tbl"><thead><tr><th>Person</th><th>Role</th><th>Last activity</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<p class="mut">Member activity is not available yet.</p>'}</section>`;
 }
-const views={overview:vOverview,students:vStudents,teachers:vTeachers,classes:vClasses,attendance:vAttendance,grades:vGrades,fees:vFees,notices:vNotices,users:vUsers,settings:vSettings};
+const views={overview:vOverview,students:vStudents,teachers:vTeachers,classes:vClasses,attendance:vAttendance,grades:vGrades,fees:vFees,notices:vNotices,timetable:vTimetable,calendar:vCalendar,expenses:vExpenses,users:vUsers,settings:vSettings};
 
 /* ---------- nav + render ---------- */
 const NAV=[['overview','Overview','M3 11l9-8 9 8M5 10v10h14V10'],
@@ -539,13 +652,16 @@ const NAV=[['overview','Overview','M3 11l9-8 9 8M5 10v10h14V10'],
  ['grades','Grades','M5 20V10M12 20V4M19 20v-7'],
  ['fees','Fees','M3 6h18v12H3zM3 10h18M7 15h3'],
  ['notices','Notices','M4 5h16v11H9l-5 4V5z'],
+ ['timetable','Timetable','M4 5h16v15H4zM8 3v4M16 3v4M4 10h16'],
+ ['calendar','Calendar','M4 5h16v15H4zM8 3v4M16 3v4M4 10h16'],
+ ['expenses','Expenses','M3 6h18v12H3zM3 10h18M7 15h3'],
  ['users','Users','M16 8a4 4 0 1 0-8 0 4 4 0 0 0 8 0zM4 21c0-4 3.6-6 8-6s8 2 8 6M19 8v6M22 11h-6'],
  ['settings','Settings','M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2']];
 $('#nav').innerHTML=NAV.map(n=>`<button type="button" data-act="nav" data-view="${n[0]}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${n[2]}"/></svg><span>${n[1]}</span></button>`).join('')+`<button type="button" data-act="logout" id="nav-out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H5v16h4M16 8l4 4-4 4M20 12H9"/></svg><span>Sign out</span></button>`;
 
-const ROLE_VIEWS={admin:null,teacher:['overview','students','teachers','classes','attendance','grades','notices'],viewer:['notices']};
+const ROLE_VIEWS={admin:null,teacher:['overview','students','teachers','classes','attendance','grades','notices','timetable','calendar'],viewer:['notices','calendar']};
 const allowed=v=>!ROLE_VIEWS[ui.role]||ROLE_VIEWS[ui.role].includes(v);
-const loading=()=>ui.mode==='connecting'||(ui.mode==='shared'&&!ui.slow&&(COLS.some(c=>!ui.loaded[c])||!ui.loaded.accounts));
+const loading=()=>ui.mode==='connecting'||(ui.mode==='shared'&&!!ui.authUser&&!!ui.schoolId&&!ui.slow&&(COLS.some(c=>!ui.loaded[c])||!ui.loaded.accounts));
 let raf=0;
 function scheduleRender(){if(raf)return;raf=requestAnimationFrame(()=>{raf=0;render()})}
 function render(){
@@ -560,13 +676,14 @@ function render(){
   document.title=(st.schoolName||'School')+' management';
   document.querySelectorAll('#nav button').forEach(b=>{b.hidden=b.dataset.view?!allowed(b.dataset.view):!ui.acct;if(b.dataset.view===ui.view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});
   $('#shell').classList.toggle('ro',!ui.canWrite);$('#shell').classList.toggle('staff',ui.role==='teacher');
-  $('#sfoot').innerHTML=`<span><b>${ui.acct?esc(ui.acct.name):ui.me?esc(ui.me):(ui.mode==='shared'?'Signed in':ui.mode==='local'?'This device only':'Connecting')}</b></span><span>${ui.mode==='shared'?(ui.role==='admin'?'Administrator':ui.role==='teacher'?'Teacher':'Viewer'):ui.mode==='local'?'Not signed in':''}</span>`;
+  const profileStatus=ui.mode==='shared'?(ui.role==='admin'?'Administrator':ui.role==='teacher'?'Teacher':'Viewer'):ui.mode==='local'?(ui.acct?(ui.role==='admin'?'Administrator · Local account':ui.role==='teacher'?'Teacher · Local account':'Viewer · Local account'):'Not signed in'): 'Connecting';
+  $('#sfoot').innerHTML=`<span><b>${ui.acct?esc(ui.acct.name):ui.me?esc(ui.me):(ui.mode==='shared'?'Signed in':ui.mode==='local'?'This device only':'Connecting')}</b></span><span>${esc(profileStatus)}</span>`;
   let html;
   const gh=loading()?null:gateHtml();$('#shell').classList.toggle('gate',!!gh);
   if(gh)html=gh;
   else if(loading())html='<div class="skel" style="width:40%;height:28px"></div><div class="skel"></div><div class="skel" style="width:80%"></div><div class="skel" style="width:60%"></div>';
   else{
-    html=(ui.role==='viewer'&&ui.mode!=='connecting'?'<div class="banner">You are signed in with view-only access. You can read notices. Ask the school administrator for teacher access to see records.</div>':(!ui.canWrite&&ui.mode!=='connecting'?'<div class="banner">You have view-only access, so editing is turned off.</div>':''))+
+    html=(ui.authError?'<div class="banner">'+esc(ui.authError)+'</div>':'')+(ui.role==='viewer'&&ui.mode!=='connecting'?'<div class="banner">You are signed in with view-only access. You can read notices. Ask the school administrator for teacher access to see records.</div>':(!ui.canWrite&&ui.mode!=='connecting'?'<div class="banner">You have view-only access, so editing is turned off.</div>':''))+
       (ui.mode==='local'?'<div class="banner">Shared storage isn\u2019t available here. Records are saved in this browser only.</div>':'')+
       views[ui.view]();
   }
@@ -599,86 +716,177 @@ function restoreSession(){
   if(ui.acct)return;let id=null;try{id=sessionStorage.getItem(SESSION_KEY)}catch(e){}
   const a=id&&by(S.accounts,id);if(a&&!a.disabled&&!a.mustChange)applyLogin(a);
 }
-function logout(){
+async function logout(){
+  if(ui.mode==='shared'&&supabaseClient){await supabaseClient.auth.signOut();return;}
   ui.acct=null;ui.role=ui.share;ui.view='overview';ui.loginId='';ui.attDraft=null;ui.grDraft=null;
   try{sessionStorage.removeItem(SESSION_KEY)}catch(e){}
   closeDlg();render();window.scrollTo(0,0);
 }
 const lbrand=()=>`<div class="lb"><div class="mark" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"/></svg></div><div><strong style="font:800 1.1rem var(--head)">${esc(S.settings.schoolName)}</strong><br><small class="mut">${esc(S.settings.term)}</small></div></div>`;
+function cloudLoginHtml(){
+  const authNotice=ui.authError?`<div class="banner" role="alert" style="margin:.75rem 0">${esc(ui.authError)}</div>`:'';
+  if(ui.authTab==='signup')return `<section class="login">${lbrand()}${authNotice}<h1 style="font-size:1.6rem">Create your EDUNEXUS account</h1><p class="mut">Create the first school administrator account, or join an existing school with its join code. Sign in with your email and password. No verification code is needed when Supabase “Confirm email” is turned off.</p>
+  <form id="sf" novalidate style="display:grid;gap:1rem">
+  <label class="fld" for="su-name"><span>Full name</span><input id="su-name" autocomplete="name" required value=""></label>
+  <label class="fld" for="su-mail"><span>Email address</span><input id="su-mail" type="email" autocomplete="email" autocapitalize="none" required value=""></label>
+  <label class="fld" for="su-pw"><span>Password (at least 8 characters)</span><input id="su-pw" type="password" autocomplete="new-password" required></label>
+  <label class="fld" for="su-pw2"><span>Confirm password</span><input id="su-pw2" type="password" autocomplete="new-password" required></label>
+  <label class="fld" for="su-school"><span>School name (for the first administrator)</span><input id="su-school" placeholder="e.g. EDUNEXUS Secondary School"></label>
+  <label class="fld" for="su-code"><span>School join code (for existing school members)</span><input id="su-code" autocapitalize="characters" placeholder="Leave blank when creating a new school"></label>
+  <p class="mut"><small>Enter either a school name or a join code, not both. For password-only setup without a verification code, turn off “Confirm email” in your Supabase project's Email provider settings before creating the account.</small></p>
+  <p class="err" id="gx-err" role="alert"></p><button class="btn pri" type="submit" id="gx-go">Create account</button></form>
+  <p class="mut">Already registered? <button class="link" type="button" data-act="auth-tab" data-tab="login">Sign in</button></p></section>`;
+  return `<section class="login">${lbrand()}${authNotice}<h1 style="font-size:1.6rem">Sign in to EDUNEXUS</h1><p class="mut">Use your administrator email and password. EDUNEXUS uses password-based sign-in; it should not ask you for a verification code when Supabase “Confirm email” is turned off.</p>
+  <form id="lf" novalidate style="display:grid;gap:1rem">
+  <label class="fld" for="lg-id"><span>Email address</span><input id="lg-id" data-in="lgid" type="email" autocomplete="username" autocapitalize="none" spellcheck="false" value="${esc(ui.loginId)}" required></label>
+  <label class="fld" for="lg-pw"><span>Password</span><div class="pw"><input id="lg-pw" type="password" autocomplete="current-password" required><button type="button" data-act="pw-toggle" aria-label="Show or hide password">Show</button></div></label>
+  <p class="err" id="lg-err" role="alert"></p><button class="btn pri" type="submit" id="lg-go">Sign in</button>
+  <button class="btn" type="button" data-act="forgot-password">Forgot password?</button></form>
+  <p class="mut"><small>First-time setup? Create your administrator account with your email and password. Email confirmation must be disabled in Supabase to skip verification codes.</small></p>
+  <p class="mut">New to EDUNEXUS? <button class="link" type="button" data-act="auth-tab" data-tab="signup">Create an account or set up a school</button></p></section>`;
+}
+function cloudMembershipSetupHtml(){
+  const authNotice=ui.authError?`<div class="banner" role="alert" style="margin:.75rem 0">${esc(ui.authError)}</div>`:'';
+  const nm=(ui.authUser&&ui.authUser.user_metadata&&ui.authUser.user_metadata.full_name)||'';
+  return `<section class="login">${lbrand()}${authNotice}<h1 style="font-size:1.6rem">Connect your account to a school</h1><p class="mut">Your account is signed in, but it is not linked to a school yet. Create the first school, or join one using the school code from its administrator.</p>
+  <form id="mf" novalidate style="display:grid;gap:1rem">
+  <label class="fld" for="ms-name"><span>Your full name</span><input id="ms-name" autocomplete="name" value="${esc(nm)}" required></label>
+  <label class="fld" for="ms-school"><span>School name (to create a new school)</span><input id="ms-school" placeholder="Enter only if you are setting up a new school"></label>
+  <label class="fld" for="ms-code"><span>School join code (to join an existing school)</span><input id="ms-code" autocapitalize="characters" placeholder="Enter only if joining a school"></label>
+  <p class="err" id="mf-err" role="alert"></p><button class="btn pri" type="submit" id="mf-go">Continue</button>
+  <button class="btn" type="button" data-act="logout">Sign out</button></form></section>`;
+}
 function gateHtml(){
-  if(ui.share==='viewer')return null;
-  if(!ui.acct){
-    if(!S.accounts.length)return ui.share==='admin'?setupHtml():`<section class="login">${lbrand()}<h1 style="font-size:1.6rem">Setup pending</h1><p class="mut">The school administrator hasn’t created the first account yet. Please check back soon.</p></section>`;
-    return loginHtml();
+  if(ui.mode==='shared'){
+    if(!ui.authUser)return cloudLoginHtml();
+    if(!ui.acct)return cloudMembershipSetupHtml();
+    return null;
   }
+  if(ui.share==='viewer')return null;
+  if(!ui.acct){if(!S.accounts.length)return ui.share==='admin'?setupHtml():`<section class="login">${lbrand()}<h1 style="font-size:1.6rem">Setup pending</h1><p class="mut">The school administrator hasn’t created the first account yet. Please check back soon.</p></section>`;return loginHtml();}
   return ui.acct.mustChange?changeHtml():null;
 }
 function loginHtml(){
   const em=ui.loginTab==='email';
   return `<section class="login">${lbrand()}<h1 style="font-size:1.6rem">Sign in</h1>
   <div class="tabs" role="tablist" style="margin:0"><button type="button" role="tab" data-act="login-tab" data-tab="username" aria-selected="${!em}">Username</button><button type="button" role="tab" data-act="login-tab" data-tab="email" aria-selected="${em}">Email</button></div>
-  <form id="lf" novalidate style="display:grid;gap:1rem">
-  <label class="fld" for="lg-id"><span>${em?'Email address':'Username'}</span><input id="lg-id" data-in="lgid" type="${em?'email':'text'}" autocomplete="${em?'email':'username'}" autocapitalize="none" spellcheck="false" value="${esc(ui.loginId)}"></label>
-  <label class="fld" for="lg-pw"><span>Password</span><div class="pw"><input id="lg-pw" type="password" autocomplete="current-password"><button type="button" data-act="pw-toggle" aria-label="Show or hide password">Show</button></div></label>
-  <p class="err" id="lg-err" role="alert"></p>
-  <button class="btn pri" type="submit" id="lg-go">Sign in</button></form>
-  <p class="mut"><small>Forgot your password? Ask your school administrator to reset it.</small></p></section>`;
+  <form id="lf" novalidate style="display:grid;gap:1rem"><label class="fld" for="lg-id"><span>${em?'Email address':'Username'}</span><input id="lg-id" data-in="lgid" type="${em?'email':'text'}" autocomplete="${em?'email':'username'}" autocapitalize="none" spellcheck="false" value="${esc(ui.loginId)}"></label>
+  <label class="fld" for="lg-pw"><span>Password</span><div class="pw"><input id="lg-pw" type="password" autocomplete="current-password"><button type="button" data-act="pw-toggle" aria-label="Show or hide password">Show</button></div></label><p class="err" id="lg-err" role="alert"></p><button class="btn pri" type="submit" id="lg-go">Sign in</button></form><p class="mut"><small>Forgot your password? Ask your school administrator to reset it.</small></p></section>`;
 }
 function setupHtml(){
-  return `<section class="login">${lbrand()}<h1 style="font-size:1.6rem">Create the administrator account</h1><p class="mut">This is the first-time setup. This account can add users and set their passwords.</p>
-  <form id="sf" novalidate style="display:grid;gap:1rem">
-  <label class="fld" for="su-name"><span>Full name</span><input id="su-name" value="Josam"></label>
-  <label class="fld" for="su-user"><span>Username</span><input id="su-user" value="josam" autocapitalize="none"></label>
-  <label class="fld" for="su-mail"><span>Email address</span><input id="su-mail" type="email" value="josam2403@2gmail.com" autocapitalize="none"></label>
-  <label class="fld" for="su-pw"><span>Password</span><input id="su-pw" type="password" autocomplete="new-password"></label>
-  <label class="fld" for="su-pw2"><span>Confirm password</span><input id="su-pw2" type="password" autocomplete="new-password"></label>
-  <p class="err" id="gx-err" role="alert"></p>
-  <button class="btn pri" type="submit" id="gx-go">Create account and sign in</button></form></section>`;
+  return `<section class="login">${lbrand()}<h1 style="font-size:1.6rem">Create the administrator account</h1><p class="mut">First-time setup for local browser storage only. For cloud sync, configure Supabase in supabase-config.js.</p>
+  <form id="sf" novalidate style="display:grid;gap:1rem"><label class="fld" for="su-name"><span>Full name</span><input id="su-name" value=""></label><label class="fld" for="su-user"><span>Username</span><input id="su-user" value="josam" autocapitalize="none"></label><label class="fld" for="su-mail"><span>Email address</span><input id="su-mail" type="email" value=""></label><label class="fld" for="su-pw"><span>Password</span><input id="su-pw" type="password" autocomplete="new-password"></label><label class="fld" for="su-pw2"><span>Confirm password</span><input id="su-pw2" type="password" autocomplete="new-password"></label><p class="err" id="gx-err" role="alert"></p><button class="btn pri" type="submit" id="gx-go">Create account and sign in</button></form></section>`;
 }
 function changeHtml(){
-  return `<section class="login">${lbrand()}<h1 style="font-size:1.6rem">Choose a new password</h1><p class="mut">Your current password is too short to keep. Pick one with at least 6 characters.</p>
-  <form id="cf" novalidate style="display:grid;gap:1rem">
-  <label class="fld" for="cf-pw"><span>New password</span><input id="cf-pw" type="password" autocomplete="new-password"></label>
-  <label class="fld" for="cf-pw2"><span>Confirm new password</span><input id="cf-pw2" type="password" autocomplete="new-password"></label>
-  <p class="err" id="gx-err" role="alert"></p>
-  <div class="dact"><button type="button" class="btn" data-act="logout">Sign out</button><button class="btn pri" type="submit" id="gx-go">Save password</button></div></form></section>`;
+  return `<section class="login">${lbrand()}<h1 style="font-size:1.6rem">Choose a new password</h1><p class="mut">Pick a password with at least 6 characters.</p><form id="cf" novalidate style="display:grid;gap:1rem"><label class="fld" for="cf-pw"><span>New password</span><input id="cf-pw" type="password" autocomplete="new-password"></label><label class="fld" for="cf-pw2"><span>Confirm new password</span><input id="cf-pw2" type="password" autocomplete="new-password"></label><p class="err" id="gx-err" role="alert"></p><div class="dact"><button type="button" class="btn" data-act="logout">Sign out</button><button class="btn pri" type="submit" id="gx-go">Save password</button></div></form></section>`;
 }
 const cryptoOk=()=>!!(window.crypto&&crypto.subtle);
+async function completePendingMembership(){
+  if(!supabaseClient||!ui.authUser)return false;
+  let pending=null;try{pending=JSON.parse(localStorage.getItem('edunexus-pending-membership')||'null')}catch(e){}
+  if(!pending)return false;
+  const name=pending.name||ui.authUser.user_metadata?.full_name||ui.authUser.email||'School user';
+  let result;
+  if(pending.schoolName){result=await supabaseClient.rpc('create_school',{p_school_name:pending.schoolName,p_display_name:name,p_email:ui.authUser.email||'',p_username:(ui.authUser.email||'').split('@')[0]});}
+  else if(pending.joinCode){result=await supabaseClient.rpc('join_school',{p_join_code:pending.joinCode,p_display_name:name,p_email:ui.authUser.email||'',p_username:(ui.authUser.email||'').split('@')[0]});}
+  else return false;
+  if(result.error)throw result.error;
+  try{localStorage.removeItem('edunexus-pending-membership')}catch(e){}
+  await syncAuthSession(ui.authUser);
+  return true;
+}
+async function syncAuthSession(user){
+  const gen=++ui.authGeneration;
+  ui.authUser=user||null;ui.acct=null;ui.schoolId=null;ui.canWrite=false;
+  if(!user){if(backend&&backend.stop)await backend.stop();clearCloudData();ui.role='viewer';ui.share='viewer';ui.cloudReady=false;ui.cloudStatus='SIGNED_OUT';ui.authTab='login';render();return;}
+  ui.uid=user.id;ui.me=(user.user_metadata&&user.user_metadata.full_name)||user.email||'';
+  const {data:member,error}=await supabaseClient.from('school_memberships').select('school_id,user_id,display_name,username,email,role,disabled,created_at').eq('user_id',user.id).maybeSingle();
+  if(gen!==ui.authGeneration)return;
+  if(error)throw error;
+  if(!member){if(backend&&backend.stop)await backend.stop();clearCloudData();ui.authUser=user;ui.canWrite=false;ui.role='viewer';ui.share='viewer';ui.loaded.accounts=true;COLS.forEach(c=>ui.loaded[c]=true);ui.cloudReady=true;render();return;}
+  const acct=memberToAccount(member);ui.schoolId=member.school_id;ui.acct=acct;ui.role=acct.role;ui.share=acct.role;ui.canWrite=!acct.disabled&&acct.role!=='viewer';ui.cloudReady=false;
+  if(acct.disabled){ui.authError='This account has been disabled by the school administrator.';ui.acct=null;clearCloudData();ui.authUser=user;render();return;}
+  backend=supabaseBackend(supabaseClient);await backend.start(member.school_id);
+  if(gen!==ui.authGeneration)return;
+  ui.acct=by(S.accounts,user.id)||acct;ui.role=ui.acct.role;ui.share=ui.acct.role;ui.canWrite=ui.acct.role!=='viewer'&&!ui.acct.disabled;render();
+}
 async function doLogin(){
-  const err=m=>{const p=$('#lg-err');if(p)p.textContent=m};
-  const now=Date.now();
-  if(now<ui.lockUntil){err('Too many attempts. Try again in '+Math.ceil((ui.lockUntil-now)/1000)+' seconds.');return}
-  const em=ui.loginTab==='email',idv=$('#lg-id').value.trim().toLowerCase(),pw=$('#lg-pw').value;
-  if(!idv||!pw){err('Enter your '+(em?'email address':'username')+' and password.');return}
-  if(!cryptoOk()){err('This browser can’t verify passwords securely.');return}
-  const b=$('#lg-go');b.disabled=true;
-  const a=S.accounts.find(x=>em?(x.email||'').toLowerCase()===idv:(x.username||'').toLowerCase()===idv);
-  let ok=false;
-  try{ok=a?(await hashPw(pw,a.salt))===a.hash:(await hashPw(pw,newSalt()),false)}catch(e){}
-  b.disabled=false;
-  if(!ok){
-    ui.fails++;
-    if(ui.fails>=5){ui.fails=0;ui.lockUntil=Date.now()+30000;err('Too many attempts. Try again in 30 seconds.')}
-    else err('Incorrect '+(em?'email':'username')+' or password.');
-    $('#lg-pw').value='';return;
+  if(ui.mode==='shared'&&supabaseClient){
+    const err=m=>{const p=$('#lg-err');if(p)p.textContent=m;};
+    const email=$('#lg-id').value.trim().toLowerCase(),password=$('#lg-pw').value;
+    if(!email||!password){err('Enter your email and password.');return;}
+    const b=$('#lg-go');b.disabled=true;
+    const {data,error}=await supabaseClient.auth.signInWithPassword({email,password});b.disabled=false;
+    if(error){
+      const detail=String(error.message||'');
+      if(/email not confirmed|email.*confirm/i.test(detail)) err('Email confirmation is still enabled in Supabase. Turn off Confirm email under Authentication → Sign In / Providers → Email. An already-created unconfirmed account may need to be confirmed or recreated from Supabase Authentication → Users.');
+      else err(detail==='Invalid login credentials'?'Email or password is incorrect.':detail);
+      return;
+    }
+    try{await syncAuthSession(data.user);await completePendingMembership();toast('Signed in successfully.');}catch(e){err(e.message||'Signed in, but could not load your school.');}
+    return;
   }
-  if(a.disabled){err('This account is disabled. Ask your school administrator.');return}
-  ui.fails=0;applyLogin(a);
+  const err=m=>{const p=$('#lg-err');if(p)p.textContent=m};const now=Date.now();
+  if(now<ui.lockUntil){err('Too many attempts. Try again in '+Math.ceil((ui.lockUntil-now)/1000)+' seconds.');return;}
+  const em=ui.loginTab==='email',idv=$('#lg-id').value.trim().toLowerCase(),pw=$('#lg-pw').value;
+  if(!idv||!pw){err('Enter your '+(em?'email address':'username')+' and password.');return;}if(!cryptoOk()){err('This browser can’t verify passwords securely.');return;}
+  const b=$('#lg-go');b.disabled=true;const a=S.accounts.find(x=>em?(x.email||'').toLowerCase()===idv:(x.username||'').toLowerCase()===idv);let ok=false;
+  try{ok=a?(await hashPw(pw,a.salt))===a.hash:(await hashPw(pw,newSalt()),false)}catch(e){}b.disabled=false;
+  if(!ok){ui.fails++;if(ui.fails>=5){ui.fails=0;ui.lockUntil=Date.now()+30000;err('Too many attempts. Try again in 30 seconds.')}else err('Incorrect '+(em?'email':'username')+' or password.');$('#lg-pw').value='';return;}
+  if(a.disabled){err('This account is disabled. Ask your school administrator.');return;}ui.fails=0;applyLogin(a);
 }
 async function doSetup(){
-  const err=m=>{$('#gx-err').textContent=m},g=id=>$('#'+id).value.trim();
-  const name=g('su-name'),username=g('su-user'),email=g('su-mail'),pw=$('#su-pw').value,pw2=$('#su-pw2').value;
-  if(!name||!username||!email||!pw){err('Fill in every field.');return}
-  if(!USER_RE.test(username)){err('Username must be 3 to 30 letters, numbers, dots, dashes or underscores.');return}
-  if(!MAIL_RE.test(email)){err('Enter a valid email address.');return}
-  if(pw!==pw2){err('The two passwords don’t match.');return}
-  if(!cryptoOk()){err('This browser can’t store passwords securely.');return}
-  const b=$('#gx-go');b.disabled=true;
-  const salt=newSalt(),hash=await hashPw(pw,salt);
-  const rec={name,username,email,role:'admin',hash,salt,disabled:false,mustChange:pw.length<6,createdAt:Date.now()};
-  let nid;
-  const ok=await run(async()=>{nid=await backend.put('accounts',rec)});
-  if(ok)applyLogin(by(S.accounts,nid)||Object.assign({id:nid},rec));else b.disabled=false;
+  if(ui.mode==='shared'&&supabaseClient){
+    const err=m=>{const p=$('#gx-err');if(p)p.textContent=m;};
+    const name=$('#su-name').value.trim(),email=$('#su-mail').value.trim().toLowerCase(),password=$('#su-pw').value,password2=$('#su-pw2').value,schoolName=$('#su-school').value.trim(),joinCode=$('#su-code').value.trim().toUpperCase();
+    if(!name||!email||!password){err('Enter your name, email, and password.');return;}if(password.length<8){err('Use a password with at least 8 characters.');return;}if(password!==password2){err('The two passwords do not match.');return;}if(!!schoolName===!!joinCode){err('Enter either a school name or a school join code, but not both.');return;}
+    const b=$('#gx-go');b.disabled=true;
+    let signupResult;
+    try {
+      signupResult=await supabaseClient.auth.signUp({
+        email,password,
+        options:{data:{full_name:name},emailRedirectTo:window.location.origin+window.location.pathname}
+      });
+    } catch(e) {
+      b.disabled=false;err(e&&e.message?e.message:'Could not contact the authentication service. Check your connection and try again.');return;
+    }
+    const {data,error}=signupResult;b.disabled=false;
+    if(error){err(error.message);return;}
+    try{localStorage.setItem('edunexus-pending-membership',JSON.stringify({name,schoolName,joinCode}));}catch(e){}
+    if(data.session&&data.user){try{await syncAuthSession(data.user);await completePendingMembership();toast('Your account and school access are ready.');}catch(e){err(e.message||'Account created but school setup could not finish. Sign in and retry.');}}
+    else{ui.authTab='login';render();toast('Account created, but Supabase still requires email confirmation. Turn off Confirm email in Supabase before creating a new account to use password-only setup.');}
+    return;
+  }
+  const err=m=>{$('#gx-err').textContent=m},g=id=>$('#'+id).value.trim();const name=g('su-name'),username=g('su-user'),email=g('su-mail'),pw=$('#su-pw').value,pw2=$('#su-pw2').value;
+  if(!name||!username||!email||!pw){err('Fill in every field.');return;}if(!USER_RE.test(username)){err('Username must be 3 to 30 letters, numbers, dots, dashes or underscores.');return;}if(!MAIL_RE.test(email)){err('Enter a valid email address.');return;}if(pw!==pw2){err('The two passwords don’t match.');return;}if(!cryptoOk()){err('This browser can’t store passwords securely.');return;}
+  const b=$('#gx-go');b.disabled=true;const salt=newSalt(),hash=await hashPw(pw,salt);const rec={name,username,email,role:'admin',hash,salt,disabled:false,mustChange:pw.length<6,createdAt:Date.now()};let nid;
+  const ok=await run(async()=>{nid=await backend.put('accounts',rec)});if(ok)applyLogin(by(S.accounts,nid)||Object.assign({id:nid},rec));else b.disabled=false;
+}
+async function doMembershipSetup(){
+  const err=m=>{const p=$('#mf-err');if(p)p.textContent=m;};if(!supabaseClient||!ui.authUser){err('Please sign in again.');return;}
+  const name=$('#ms-name').value.trim(),schoolName=$('#ms-school').value.trim(),joinCode=$('#ms-code').value.trim().toUpperCase();
+  if(!name){err('Enter your full name.');return;}if(!!schoolName===!!joinCode){err('Enter either a school name or a join code, not both.');return;}
+  const b=$('#mf-go');b.disabled=true;
+  try{const result=schoolName?await supabaseClient.rpc('create_school',{p_school_name:schoolName,p_display_name:name,p_email:ui.authUser.email||'',p_username:(ui.authUser.email||'').split('@')[0]}):await supabaseClient.rpc('join_school',{p_join_code:joinCode,p_display_name:name,p_email:ui.authUser.email||'',p_username:(ui.authUser.email||'').split('@')[0]});if(result.error)throw result.error;await syncAuthSession(ui.authUser);toast(schoolName?'School created.':'Joined school successfully.');}
+  catch(e){err(e.message||'Could not connect to that school. Check the code and try again.');}finally{if($('#mf-go'))$('#mf-go').disabled=false;}
+}
+async function resendConfirmationEmail(email){
+  if(!supabaseClient){toast('Cloud authentication is not connected. Refresh the page and try again.',true);return;}
+  const address=String(email||'').trim().toLowerCase();
+  if(!MAIL_RE.test(address)){toast('Enter the email address you used to register.',true);return;}
+  try{
+    const {error}=await supabaseClient.auth.resend({
+      type:'signup',email:address,
+      options:{emailRedirectTo:window.location.origin+window.location.pathname}
+    });
+    if(error)throw error;
+    toast('If the account needs confirmation, a new confirmation email has been requested for '+address+'.');
+  }catch(e){toast(e&&e.message?e.message:'Could not request a new confirmation email. Check the Supabase Auth settings.',true);}
+}
+async function sendPasswordReset(email){
+  if(!supabaseClient||!email){toast('An email address is required for password reset.',true);return;}
+  const {error}=await supabaseClient.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin+window.location.pathname});
+  if(error)toast(error.message||'Could not send password reset email.',true);else toast('Password reset instructions were sent to '+email+'.');
 }
 async function doChange(){
   const err=m=>{$('#gx-err').textContent=m},pw=$('#cf-pw').value,pw2=$('#cf-pw2').value;
@@ -691,34 +899,58 @@ async function doChange(){
 }
 function vUsers(){
   const me=ui.acct&&ui.acct.id,rows=S.accounts.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-  const table=rows.length?`<div class="tw"><table class="tbl"><thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows.map(a=>`<tr><td><b>${esc(a.name)}</b>${a.id===me?' <small class="mut">(you)</small>':''}</td><td>${esc(a.username)}</td><td>${esc(a.email)}</td><td>${roleLabel(a.role)}</td><td>${a.disabled?'<span class="bad">Disabled</span>':'Active'}</td><td class="r"><span class="row w" style="justify-content:flex-end">${btn('Edit','user-edit',{id:a.id,sm:1})}${btn('Reset password','user-pw',{id:a.id,sm:1})}${a.id===me?'':btn(a.disabled?'Enable':'Disable','user-toggle',{id:a.id,sm:1})+btn('Delete','user-del',{id:a.id,sm:1})}</span></td></tr>`).join('')}</tbody></table></div>`:note('No users yet','Add the people who will sign in to this system.',btn('Add user','user-new',{pri:1,w:1}));
-  return head('Users','Create sign-ins and set passwords for staff.',btn('Add user','user-new',{pri:1,w:1}))+`<div class="banner">Each person also needs an invitation to this page in the Share menu: Contributor for teachers, Editor for administrators. The accounts here control the sign-in screen and each person’s role inside the app.</div>`+table;
+  const table=rows.length?`<div class="tw"><table class="tbl"><thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${rows.map(a=>`<tr><td><b>${esc(a.name)}</b>${a.id===me?' <small class="mut">(you)</small>':''}</td><td>${esc(a.username)}</td><td>${esc(a.email)}</td><td>${roleLabel(a.role)}</td><td>${a.disabled?'<span class="bad">Disabled</span>':'Active'}</td><td class="r"><span class="row w" style="justify-content:flex-end">${btn('Edit role','user-edit',{id:a.id,sm:1})}${btn('Reset password','user-pw',{id:a.id,sm:1})}${a.id===me?'':btn(a.disabled?'Enable':'Disable','user-toggle',{id:a.id,sm:1})}${a.id===me?'':btn('Remove access','user-del',{id:a.id,sm:1})}</span></td></tr>`).join('')}</tbody></table></div>`:note('No school members yet','Share the school code with a teacher so they can create an account and join.',btn('Show school join code','user-new',{pri:1,w:1}));
+  return head('Users','Manage who can access this school and what they can do.',btn('Invite / add user','user-new',{pri:1,w:1}))+`<div class="banner">To protect accounts, users create their own password through Supabase Auth. Share the school join code with trusted staff; new members start as teachers. Change their role here after they join.</div>`+table;
 }
 function userForm(a){
-  const f=[{name:'name',label:'Full name',required:true,wide:true},{name:'username',label:'Username',required:true,placeholder:'For example jmukasa'},{name:'role',label:'Role',type:'select',options:[{v:'teacher',l:'Teacher'},{v:'admin',l:'Administrator'}]},{name:'email',label:'Email address',type:'email',required:true,wide:true}];
+  if(!a&&ui.mode==='shared'){
+    dlg(`<h2>Invite a school member</h2><p>Ask the person to open EDUNEXUS, choose <b>Create an account or set up a school</b>, register with their own email, and enter this school join code. They will begin with Teacher access. You can change their role after they join.</p><div class="panel"><p class="mut">School join code</p><p style="font-size:1.5rem;font-weight:800;letter-spacing:.16em">${esc(ui.joinCode||'Loading…')}</p></div><div class="dact"><button type="button" class="btn" data-act="close">Close</button>${ui.joinCode?btn('Copy school code','copy-join-code',{pri:1}):''}</div>`);return;
+  }
+  const f=[{name:'name',label:'Full name',required:true,wide:true},{name:'username',label:'Username'},{name:'role',label:'Role',type:'select',options:[{v:'teacher',l:'Teacher'},{v:'admin',l:'Administrator'},{v:'viewer',l:'Viewer'}]},{name:'email',label:'Email address',type:'email',required:true,wide:true}];
   if(!a)f.push({name:'password',label:'Temporary password',required:true,wide:true,placeholder:'At least 4 characters'});
-  formDialog({title:a?'Edit user':'Add user',note:a?'':'Give the person this username and password. They also need an invitation to this page in the Share menu.',fields:f,values:a||{role:'teacher'},submit:a?'Save':'Add user',
+  formDialog({title:a?'Edit user':'Add user',note:a?'':'Local-only account creation. For cloud accounts, use the school join code.',fields:f,values:a||{role:'teacher'},submit:a?'Save':'Add user',
     onSave:async v=>{
-      const err=m=>{$('#frm-err').textContent=m;return false},lu=v.username.toLowerCase(),le=v.email.toLowerCase(),oid=a&&a.id;
-      if(!USER_RE.test(v.username))return err('Username must be 3 to 30 letters, numbers, dots, dashes or underscores.');
+      const err=m=>{$('#frm-err').textContent=m;return false},lu=(v.username||'').toLowerCase(),le=v.email.toLowerCase(),oid=a&&a.id;
+      if(v.username&&!USER_RE.test(v.username))return err('Username must be 3 to 30 letters, numbers, dots, dashes or underscores.');
       if(!MAIL_RE.test(v.email))return err('Enter a valid email address.');
-      if(S.accounts.some(x=>x.id!==oid&&(x.username||'').toLowerCase()===lu))return err('That username is already taken.');
+      if(S.accounts.some(x=>x.id!==oid&&(x.username||'').toLowerCase()===lu&&lu))return err('That username is already taken.');
       if(S.accounts.some(x=>x.id!==oid&&(x.email||'').toLowerCase()===le))return err('That email is already used by another user.');
       if(a&&a.role==='admin'&&v.role!=='admin'&&adminCount(a.id)===0)return err('There must be at least one administrator.');
       const rec=Object.assign({},a||{},{name:v.name,username:v.username,email:v.email,role:v.role});
-      if(!a){if(v.password.length<4)return err('Password must be at least 4 characters.');if(!cryptoOk())return err('This browser can’t store passwords securely.');rec.salt=newSalt();rec.hash=await hashPw(v.password,rec.salt);rec.disabled=false;rec.mustChange=false;rec.createdAt=Date.now()}
+      if(!a){if(ui.mode==='shared')return err('For cloud accounts, use Invite / add user and share the school join code.');if(v.password.length<4)return err('Password must be at least 4 characters.');if(!cryptoOk())return err('This browser can’t store passwords securely.');rec.salt=newSalt();rec.hash=await hashPw(v.password,rec.salt);rec.disabled=false;rec.mustChange=false;rec.createdAt=Date.now();}
       return run(()=>backend.put('accounts',rec),a?'User updated':'User added');
     }});
 }
-function resetPwForm(a){
+async function resetPwForm(a){
   if(!a)return;
+  if(ui.mode==='shared'){await sendPasswordReset(a.email);return;}
   formDialog({title:'Reset password for '+a.name,submit:'Set password',note:'Share the new password with them directly.',fields:[{name:'password',label:'New password',required:true,wide:true,placeholder:'At least 4 characters'}],
-    onSave:async v=>{
-      if(v.password.length<4){$('#frm-err').textContent='Password must be at least 4 characters.';return false}
-      if(!cryptoOk()){$('#frm-err').textContent='This browser can’t store passwords securely.';return false}
-      const salt=newSalt(),hash=await hashPw(v.password,salt);
-      return run(()=>backend.put('accounts',Object.assign({},a,{salt,hash,mustChange:false})),'Password updated');
-    }});
+    onSave:async v=>{if(v.password.length<4){$('#frm-err').textContent='Password must be at least 4 characters.';return false;}if(!cryptoOk()){$('#frm-err').textContent='This browser can’t store passwords securely.';return false;}const salt=newSalt(),hash=await hashPw(v.password,salt);return run(()=>backend.put('accounts',Object.assign({},a,{salt,hash,mustChange:false})),'Password updated');}});
+}
+function reportHtml(sid){
+  const s=stu(sid);if(!s)return '';
+  const c=cls(s.classId),st=S.settings,a=subjAvgs(sid),ov=mean(Object.values(a));
+  const mates=S.students.filter(x=>x.classId===s.classId).map(x=>({id:x.id,ov:mean(Object.values(subjAvgs(x.id)))})).filter(x=>x.ov!==null).sort((p,q)=>q.ov-p.ov);
+  const me=mates.find(m=>m.id===sid),pos=me?1+mates.findIndex(z=>Math.abs(z.ov-me.ov)<1e-9):null;
+  const subs=[...new Set([...((c&&c.subjects)||[]),...Object.keys(a)])];
+  const rows=subs.map(sub=>{
+    const det=S.grades.filter(g=>g.subject===sub&&g.classId===s.classId&&Number.isFinite(g.scores&&g.scores[sid])).sort((x,y)=>(x.date||'').localeCompare(y.date||'')).map(g=>g.title+' '+g.scores[sid]+'/'+g.max).join(', ');
+    return `<tr><td>${esc(sub)}</td><td>${esc(det)||'No scores yet'}</td><td class="n">${a[sub]===undefined?'-':Math.round(a[sub])+'%'}</td><td>${a[sub]===undefined?'':letter(a[sub])}</td></tr>`}).join('');
+  const ap=attPct(attMap()[sid]);
+  return `<div class="rc"><div class="hd"><div><h1>${esc(st.schoolName)}</h1><div class="sub">Student report card${st.term?', '+esc(st.term):''}</div></div><div style="text-align:right"><b>${esc(s.name)}</b><br>${esc(c?c.name:'')}<br>Admission no. ${esc(s.admNo||'')}</div></div><table><thead><tr><th>Subject</th><th>Assessments</th><th class="n">Average</th><th>Grade</th></tr></thead><tbody>${rows||'<tr><td colspan="4">No subjects set for this class.</td></tr>'}</tbody></table><div class="sum"><div>Overall average<b>${ov===null?'No data':Math.round(ov)+'% ('+letter(ov)+')'}</b></div><div>Class position<b>${pos?pos+' of '+mates.length:'-'}</b></div><div>Attendance<b>${ap===null?'No data':ap+'%'}</b></div></div><p><b>Comment:</b> ${esc(remark(ov))}</p><div class="sig"><div>Class teacher</div><div>Head teacher</div><div>Parent or guardian</div></div></div>`;
+}
+function reportDoc(ids){
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Report cards</title><style>body{margin:0;background:#eef1f5;padding:16px}.rc{max-width:760px;margin:0 auto 16px}.np{max-width:760px;margin:0 auto 12px}${RC_CSS}@media print{body{background:#fff;padding:0}.np{display:none}.rc{border:0;margin:0;max-width:none;page-break-after:always}}</style></head><body><div class="np"><button onclick="print()" style="padding:8px 14px;font-weight:600">Print or save as PDF</button></div>${ids.map(i=>reportHtml(i)).join('')}</body></html>`;
+}
+function reportDialog(sid){
+  if(!stu(sid))return;
+  dlg(`<style>${RC_CSS}</style>${reportHtml(sid)}<p class="mut"><small>${ui.dl?'Download the card, open it in your browser, then choose Print or Save as PDF.':'Downloads aren’t available in this view.'}</small></p><div class="dact">${btn('Close','close')}${ui.dl?btn('Download report card','rc-dl',{id:sid,pri:1}):''}</div>`);
+}
+async function rcDownload(ids,label){
+  if(!ui.dl)return;const s=stu(ids[0]);
+  const nm=String(label||(s&&s.name)||'report').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  try{await ui.dl.save({filename:'report-card'+(ids.length>1?'s':'')+'-'+nm+'.html',data:reportDoc(ids)})}
+  catch(e){if(!e||e.code!=='declined')toast('Couldn’t save the file.',true)}
 }
 
 /* ---------- entity forms ---------- */
@@ -776,6 +1008,65 @@ function chargeForm(sid){
     values:{date:todayStr()},
     onSave:v=>run(()=>backend.put('fees',{kind:'charge',scope:'student',studentIds:[sid],note:v.note,amount:v.amount,date:v.date,term:S.settings.term}),'Charge added').then(ok=>{if(ok)setTimeout(()=>ledger(sid),80);return ok})});
 }
+function bulkMarksForm(){
+  const c=cls(ui.grClass);
+  if(!c){toast('Choose a class first.',true);return;}
+  if(!ui.canWrite){toast('You have view-only access.',true);return;}
+  const subjects=[...new Set((c.subjects||[]).map(x=>String(x||'').trim()).filter(Boolean))];
+  const studs=S.students.filter(s=>s.classId===c.id).sort(byName);
+  if(!subjects.length){toast('Add subjects to this class in Classes → Edit class first.',true);return;}
+  if(!studs.length){toast('Add students to '+c.name+' before entering marks.',true);return;}
+  const rows=studs.map((st,i)=>`<tr><td>${i+1}</td><td><b>${esc(st.name)}</b><br><small class="mut">${esc(st.admNo||'No admission number')}</small></td>${subjects.map(sub=>`<td><input class="bulk-score" type="number" min="0" max="100" step="any" inputmode="decimal" data-bulk-score data-student-id="${esc(st.id)}" data-subject="${esc(sub)}" aria-label="${esc(sub)} mark for ${esc(st.name)}" placeholder="—"></td>`).join('')}</tr>`).join('');
+  const html=`<form id="bulk-grades-form" novalidate>
+    <div><h2>Enter marks for all subjects</h2><p class="mut" style="margin-top:.35rem">${esc(c.name)} · ${studs.length} student${studs.length===1?'':'s'} · ${subjects.length} subject${subjects.length===1?'':'s'}</p></div>
+    <div class="bulk-grade-meta">
+      <label class="fld" for="bulk-title"><span>Assessment title</span><input id="bulk-title" required maxlength="120" value="End of term" placeholder="e.g. Midterm test"></label>
+      <label class="fld" for="bulk-date"><span>Assessment date</span><input id="bulk-date" type="date" required value="${todayStr()}"></label>
+      <label class="fld" for="bulk-max"><span>Maximum mark per subject</span><input id="bulk-max" type="number" min="1" max="10000" step="any" required value="100"></label>
+    </div>
+    <p class="mut">Enter marks in the subject columns, then save once. Blank cells are skipped; if you are updating an assessment with the same title and date, existing marks in blank cells are kept. The maximum applies to every subject in this grid.</p>
+    <div class="bulk-grade-grid"><table class="tbl"><thead><tr><th>#</th><th>Student</th>${subjects.map(sub=>`<th class="r">${esc(sub)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="err" id="bulk-grades-error" role="alert" aria-live="polite"></p>
+    <div class="dact"><button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn pri" id="bulk-grades-save">Save all subject marks</button></div>
+  </form>`;
+  const dialog=$('#dlg');dialog.classList.add('wide');dlg(html);
+  $('#bulk-grades-form').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const form=e.currentTarget,err=$('#bulk-grades-error'),save=$('#bulk-grades-save');
+    const title=$('#bulk-title').value.trim(),date=$('#bulk-date').value,max=Number($('#bulk-max').value);
+    err.textContent='';
+    if(!title||!date){err.textContent='Enter an assessment title and date.';return;}
+    if(!Number.isFinite(max)||max<=0){err.textContent='The maximum mark must be greater than zero.';return;}
+    const incoming=Object.fromEntries(subjects.map(sub=>[sub,{}]));
+    let count=0,invalid=null;
+    form.querySelectorAll('[data-bulk-score]').forEach(input=>{
+      const raw=input.value.trim();if(raw==='')return;
+      const score=Number(raw);
+      if(!Number.isFinite(score)||score<0||score>max){invalid=input;return;}
+      incoming[input.dataset.subject][input.dataset.studentId]=score;count++;
+    });
+    if(invalid){err.textContent='Every mark must be between 0 and '+max+'. Please correct the highlighted subject mark.';invalid.focus();return;}
+    if(!count){err.textContent='Enter at least one mark before saving.';return;}
+    if(!ui.canWrite){err.textContent='Your account has view-only access.';return;}
+    save.disabled=true;save.textContent='Saving marks…';
+    const assessmentIds=[];
+    const ok=await run(async()=>{
+      for(const subject of subjects){
+        const existing=S.grades.find(g=>g.classId===c.id&&g.subject===subject&&g.title===title&&g.date===date);
+        const scores=Object.assign({},existing&&existing.scores||{},incoming[subject]);
+        const record={id:existing?existing.id:genId(),classId:c.id,subject,title,date,max,scores};
+        await backend.put('grades',record);
+        assessmentIds.push(record.id);
+      }
+    },'Saved marks for all '+subjects.length+' subjects');
+    if(ok){ui.grAssess=assessmentIds[0]||'';ui.grDraft=null;ui.grTab='assess';closeDlg();render();}
+    else{
+      err.textContent='Saving did not finish. Some subject assessments may already have been saved; check Grades before retrying. Reusing the same title and date will update matching assessments.';
+      save.disabled=false;save.textContent='Save all subject marks';
+    }
+  });
+}
+
 function assessForm(g){
   const c=cls(ui.grClass);if(!c)return;
   const subs=(c.subjects||[]).slice();if(g&&!subs.includes(g.subject))subs.push(g.subject);
@@ -804,7 +1095,7 @@ function stuDetail(id){
   <dl class="kv"><div><dt>Parent or guardian</dt><dd>${esc(s.guardian||'Not set')}</dd></div><div><dt>Guardian phone</dt><dd>${esc(s.phone||'Not set')}</dd></div><div><dt>Date of birth</dt><dd>${s.dob?fmtDate(s.dob):'Not set'}</dd></div><div><dt>Gender</dt><dd>${s.gender==='F'?'Female':s.gender==='M'?'Male':'Not stated'}</dd></div></dl>
   <div class="three"><div><span>Attendance</span><b>${ap===null?'No data':ap+'%'}</b></div><div><span>Average mark</span><b>${ov===null?'No data':Math.round(ov)+'% '+letter(ov)}</b></div><div${ui.role!=='admin'?' hidden':''}><span>Fee balance</span><b class="${b.bal>0?'owe':''}">${b.billed===0?'Not billed':money(b.bal)}</b></div></div>
   <div><h3 style="margin-top:0">Recent results</h3>${res.length?`<ul class="list">${res.map(g=>`<li><span>${esc(g.subject)}: ${esc(g.title)}</span><span>${g.scores[id]} / ${g.max} <b>${letter(Math.min(100,g.scores[id]/g.max*100))}</b></span></li>`).join('')}</ul>`:'<p class="mut">No scores recorded yet.</p>'}</div>
-  <div class="dact" style="justify-content:space-between"><span class="row w">${btn('Edit','stu-edit',{id})}${btn('Delete','stu-del',{id})}</span><span class="row">${ui.role==='admin'?btn('Fee ledger','ledger',{id}):''}${btn('Close','close',{pri:1})}</span></div>`);
+  <div class="dact" style="justify-content:space-between"><span class="row w">${btn('Edit','stu-edit',{id})}${btn('Delete','stu-del',{id})}</span><span class="row">${btn('Report card','rc',{id})}${ui.role==='admin'?btn('Fee ledger','ledger',{id}):''}${btn('Close','close',{pri:1})}</span></div>`);
 }
 function ledger(sid){
   const s=stu(sid);if(!s)return;const rows=[];
@@ -817,7 +1108,60 @@ function ledger(sid){
   <div class="dact" style="justify-content:space-between"><span class="row w">${btn('Add charge','charge',{id:sid})}${btn('Record payment','pay',{id:sid,pri:1})}</span>${btn('Close','close')}</div>`);
 }
 
-/* ---------- sample data ---------- */
+/* ---------- timetable editor ---------- */
+function timetableForm(t){
+ formDialog({title:t?'Edit lesson':'Add timetable lesson',values:t||{day:'Monday',start:'08:00',end:'08:40'},fields:[
+ {name:'day',label:'Day',type:'select',required:true,options:['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(x=>({v:x,l:x}))},
+ {name:'start',label:'Start time',type:'time',required:true},{name:'end',label:'End time',type:'time',required:true},
+ {name:'classId',label:'Class',type:'select',required:true,options:S.classes.map(c=>({v:c.id,l:c.name}))},
+ {name:'subject',label:'Subject',required:true},{name:'teacherId',label:'Teacher',type:'select',options:[{v:'',l:'Unassigned'},...S.teachers.map(x=>({v:x.id,l:x.name}))]},
+ {name:'room',label:'Room / venue'}],onSave:async v=>{
+ if(v.end<=v.start)return ($('#frm-err').textContent='End time must be after start time.',false);
+ const conflict=S.timetable.find(x=>x.id!==(t&&t.id)&&x.day===v.day&&x.classId===v.classId&&v.start<x.end&&v.end>x.start);
+ if(conflict)return ($('#frm-err').textContent='This class already has a lesson during that time.',false);
+ return run(()=>backend.put('timetable',Object.assign({},t||{},v)),'Timetable saved');
+ }});
+}
+function eventForm(ev){
+ formDialog({title:ev?'Edit event':'Add school event',values:ev||{date:todayStr(),category:'School activity'},fields:[
+ {name:'title',label:'Event title',required:true,wide:true},{name:'date',label:'Date',type:'date',required:true},
+ {name:'category',label:'Category',type:'select',options:['School activity','Examination','Meeting','Holiday','Deadline','Other'].map(x=>({v:x,l:x}))},
+ {name:'location',label:'Location'},{name:'description',label:'Details',type:'textarea',wide:true}],onSave:v=>run(()=>backend.put('events',Object.assign({},ev||{},v)),'Event saved')});
+}
+function expenseForm(x){
+ formDialog({title:x?'Edit expense':'Record expense',values:x||{date:todayStr(),category:'Utilities'},fields:[
+ {name:'date',label:'Date',type:'date',required:true},{name:'category',label:'Category',type:'select',required:true,options:['Utilities','Supplies','Repairs','Transport','Salaries','Food','Other'].map(v=>({v,l:v}))},
+ {name:'description',label:'Description',required:true,wide:true},{name:'payee',label:'Paid to'},{name:'amount',label:'Amount',type:'number',min:0,required:true}],onSave:v=>run(()=>backend.put('expenses',Object.assign({},x||{},v,{amount:Number(v.amount)})),'Expense saved')});
+}
+function browserDownload(filename,content,type){
+ const blob=new Blob([content],{type:type||'text/plain;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download=filename;a.style.display='none';document.body.appendChild(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+function downloadBackup(){
+ try{
+   const payload={app:'School Management',version:2,exportedAt:new Date().toISOString(),data:S};
+   browserDownload('school-backup-'+todayStr()+'.json',JSON.stringify(payload,null,2),'application/json');
+   toast('Backup downloaded. Store it somewhere safe.');
+ }catch(e){toast('Could not create backup in this browser.',true)}
+}
+function importBackup(){
+ const input=document.createElement('input');input.type='file';input.accept='.json,application/json';
+ input.onchange=async()=>{const file=input.files&&input.files[0];if(!file)return;
+ try{const data=JSON.parse(await file.text()),d=data.data||data;
+ if(!d||typeof d!=='object'||!Array.isArray(d.students)||!Array.isArray(d.teachers)||!Array.isArray(d.classes))throw Error('This file does not look like a school backup.');
+ const allowedCols=['students','teachers','classes','attendance','grades','fees','notices','timetable','events','expenses'];
+ for(const col of allowedCols){if(d[col]!==undefined&&!Array.isArray(d[col]))throw Error('Invalid backup section: '+col)}
+ if(d.settings!==undefined&&(typeof d.settings!=='object'||Array.isArray(d.settings)))throw Error('Invalid school settings in backup.');
+ for(const col of allowedCols){for(const rec of (d[col]||[])){if(!rec||typeof rec!=='object'||Array.isArray(rec)||!rec.id)throw Error('Invalid record in '+col+'.')}}
+ if(!await confirmBox('Restore backup?','This replaces the current school records with the selected backup. Download a backup first if you need to keep the current data.','Restore backup'))return;
+ const ok=await run(async()=>{for(const c of COLS){const arr=Array.isArray(d[c])?d[c]:[];for(const old of S[c].slice())await backend.remove(c,old.id);for(const rec of arr)await backend.put(c,rec)}
+ if(Array.isArray(d.accounts)){for(const old of S.accounts.slice())await backend.remove('accounts',old.id);for(const rec of d.accounts)await backend.put('accounts',rec)}if(d.settings)await backend.saveSettings(d.settings);},'Backup restored');
+ if(ok){if(backend===localBackend){lsSave()}render()}
+ }catch(e){toast('Could not restore backup: '+(e.message||'invalid file'),true)}};
+ input.click();
+}
+
 async function sampleData(){
   if(ui.busy)return;ui.busy=true;toast('Loading sample data, this takes a few seconds\u2026');
   let seed=7;const rnd=()=>{seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff};
@@ -855,7 +1199,7 @@ async function sampleData(){
 const csvCell=c=>{let s=String(c==null?'':c);if(/^[=+\-@]/.test(s))s="'"+s;return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};
 const toCsv=rows=>rows.map(r=>r.map(csvCell).join(',')).join('\n');
 async function exportCsv(kind){
-  if(!ui.dl)return;const bm=balMap();let rows,name;
+  const bm=balMap();let rows,name;
   if(kind==='students'){name='students.csv';rows=[['Admission no.','Name','Class','Gender','Date of birth','Guardian','Phone','Fee balance']].concat(S.students.slice().sort(byName).map(s=>[s.admNo,s.name,className(s.classId),s.gender,s.dob,s.guardian,s.phone,bm[s.id].bal]))}
   else{name='fee-ledger.csv';const ent=[];
     S.fees.forEach(f=>{if(f.kind==='payment'){const s=stu(f.studentId);if(s)ent.push([f.date,s.name,className(s.classId),'Payment',f.method||'',f.note||'',f.amount])}
@@ -875,11 +1219,18 @@ document.addEventListener('click',async e=>{
   switch(a){
     case 'nav':go(el.dataset.view);break;
     case 'login-tab':ui.loginTab=el.dataset.tab;render();break;
+    case 'auth-tab':ui.authTab=el.dataset.tab;ui.authError='';render();break;
+    case 'forgot-password':{const em=$('#lg-id')&&$('#lg-id').value.trim();if(!em){toast('Enter your email address first.',true);break}await sendPasswordReset(em);break}
+    case 'resend-confirmation':{const em=$('#lg-id')&&$('#lg-id').value.trim();if(!em){toast('Enter the email address you used to register.',true);break}await resendConfirmationEmail(em);break}
+    case 'copy-join-code':if(ui.joinCode){try{await navigator.clipboard.writeText(ui.joinCode);toast('School join code copied.')}catch(e){toast('Copy is unavailable; select and copy the code manually.',true)}}break;
     case 'pw-toggle':{const i=el.closest('.pw').querySelector('input');const sh=i.type==='password';i.type=sh?'text':'password';el.textContent=sh?'Hide':'Show';break}
-    case 'logout':logout();break;
+    case 'logout':await logout();break;
+    case 'rc':reportDialog(id);break;
+    case 'rc-dl':rcDownload([id]);break;
+    case 'rc-class':{const ids=S.students.filter(s=>s.classId===id).sort(byName).map(s=>s.id);if(!ids.length){toast('No students in this class.',true);break}rcDownload(ids,cls(id)&&cls(id).name);break}
     case 'user-new':userForm();break;
     case 'user-edit':userForm(by(S.accounts,id));break;
-    case 'user-pw':resetPwForm(by(S.accounts,id));break;
+    case 'user-pw':await resetPwForm(by(S.accounts,id));break;
     case 'user-toggle':{const a=by(S.accounts,id);if(!a)break;
       if(ui.acct&&a.id===ui.acct.id){toast('You can’t disable your own account.',true);break}
       if(!a.disabled&&a.role==='admin'&&adminCount(a.id)===0){toast('There must be at least one active administrator.',true);break}
@@ -890,6 +1241,18 @@ document.addEventListener('click',async e=>{
     case 'close':closeDlg();break;
     case 'c-yes':case 'c-no':{const r=pend;pend=null;closeDlg();if(r)r(a==='c-yes');break}
     case 'sample':sampleData();break;
+    case 'tt-new':timetableForm();break;
+    case 'tt-edit':timetableForm(by(S.timetable,id));break;
+    case 'tt-del':if(await confirmBox('Delete lesson?','This lesson will be removed from the timetable.','Delete'))await run(()=>backend.remove('timetable',id),'Lesson deleted');break;
+    case 'event-new':eventForm();break;
+    case 'event-edit':eventForm(by(S.events,id));break;
+    case 'event-del':if(await confirmBox('Delete event?','This event will be removed from the school calendar.','Delete'))await run(()=>backend.remove('events',id),'Event deleted');break;
+    case 'expense-new':expenseForm();break;
+    case 'expense-edit':expenseForm(by(S.expenses,id));break;
+    case 'expense-del':if(await confirmBox('Delete expense?','This expense record will be removed.','Delete'))await run(()=>backend.remove('expenses',id),'Expense deleted');break;
+    case 'print-page':window.print();break;
+    case 'backup':downloadBackup();break;
+    case 'restore':importBackup();break;
     case 'goto-att':ui.attClass=id;ui.attDraft=null;ui.attDate=todayStr();go('attendance');break;
     // students
     case 'stu-new':studentForm();break;
@@ -927,6 +1290,7 @@ document.addEventListener('click',async e=>{
     case 'g-tab':ui.grTab=el.dataset.tab;render();break;
     case 'g-pick':if(await unsaved('gr')){ui.grAssess=id;ui.grDraft=null}render();break;
     case 'g-new':assessForm();break;
+    case 'g-bulk':bulkMarksForm();break;
     case 'g-edit':assessForm(by(S.grades,id));break;
     case 'g-del':{const g=by(S.grades,id);if(!g)break;
       if(await confirmBox('Delete this assessment?',g.subject+': '+g.title+' and all its scores will be removed.','Delete assessment')){
@@ -979,6 +1343,7 @@ document.addEventListener('submit',e=>{
   const id=e.target&&e.target.id;
   if(id==='lf'){e.preventDefault();doLogin()}
   else if(id==='sf'){e.preventDefault();doSetup()}
+  else if(id==='mf'){e.preventDefault();doMembershipSetup()}
   else if(id==='cf'){e.preventDefault();doChange()}
 });
 $('#dlg').addEventListener('click',e=>{if(e.target===$('#dlg'))closeDlg()});
@@ -986,38 +1351,38 @@ $('#dlg').addEventListener('close',()=>{if(pend){const r=pend;pend=null;r(false)
 
 /* ---------- init ---------- */
 async function init(){
-  render();
-  setTimeout(()=>{if(!ui.slow){ui.slow=true;scheduleRender()}},4000);
-  for(let i=0;i<10&&!(window.claude&&typeof window.claude.use==='function');i++)await new Promise(r=>setTimeout(r,100));
-  let db=null,user=null,dl=null;
-  try{
-    if(window.claude&&typeof window.claude.use==='function'){
-      const r=await Promise.all([claude.use('db'),claude.use('user'),claude.use('downloads')]);
-      db=r[0];user=r[1];dl=r[2];
+  try {
+    const callbackUrl=new URL(window.location.href);
+    const callbackHash=new URLSearchParams(callbackUrl.hash.replace(/^#/,''));
+    const callbackError=callbackUrl.searchParams.get('error_description')||callbackUrl.searchParams.get('error')||callbackHash.get('error_description')||callbackHash.get('error');
+    const callbackErrorCode=callbackUrl.searchParams.get('error_code')||callbackHash.get('error_code')||'';
+    if(callbackError){
+      const decoded=String(callbackError).replace(/\+/g,' ');
+      if(/otp_expired|expired|invalid/i.test(callbackErrorCode+' '+decoded))
+        ui.authError='This confirmation link has expired or was already used. To use no-code password sign-in for future accounts, turn off Confirm email in Supabase Authentication settings. Existing unconfirmed accounts may need to be confirmed or recreated.';
+      else ui.authError='Email confirmation could not finish: '+decoded+'. To skip verification codes for new accounts, turn off Confirm email in Supabase Authentication settings. For confirmation-based accounts, check the Supabase Site URL and Redirect URLs.';
+      ['error','error_code','error_description'].forEach(k=>{callbackUrl.searchParams.delete(k);callbackHash.delete(k)});
+      callbackUrl.hash=callbackHash.toString()?'#'+callbackHash.toString():'';
+      history.replaceState({},document.title,callbackUrl.pathname+(callbackUrl.search?callbackUrl.search:'')+callbackUrl.hash);
     }
-  }catch(e){}
-  ui.dl=dl||null;userNs=user||null;
-  if(db){
-    backend=dbBackend(db);ui.mode='shared';
-    ui.role='teacher';
+    render();
+  } catch(e){console.error('EDUNEXUS startup render failed:',e);throw e;}
+  const cfg=window.EDUNEXUS_CONFIG||{};
+  const cloudConfigured=typeof cfg.SUPABASE_URL==='string'&&/^https:\/\//.test(cfg.SUPABASE_URL)&&typeof cfg.SUPABASE_ANON_KEY==='string'&&cfg.SUPABASE_ANON_KEY.length>20&&!/YOUR_|PASTE_|REPLACE_ME/i.test(cfg.SUPABASE_URL+cfg.SUPABASE_ANON_KEY);
+  if(cloudConfigured&&window.supabase&&typeof window.supabase.createClient==='function'){
     try{
-      if(user){
-        ui.uid=await user.id();
-        const adm=(await user.canEdit())||(await user.isOwner());
-        ui.role=adm?'admin':'teacher';
-        try{const m=await user.me();ui.me=(m&&m.name)||''}catch(e){}
-        if(ui.uid){
-          try{await backend.signIn(ui.uid)}
-          catch(e){if(!adm&&e&&e.code==='invalid_argument'){ui.role='viewer';ui.canWrite=false}}
-        }
-      }
-    }catch(e){}
-    ui.share=ui.role;backend.subscribe();if(ui.role==='admin')backend.watchAccess();
-  }else{
-    backend=localBackend;ui.mode='local';ui.share='admin';ui.role='admin';lsLoad();restoreSession();
+      supabaseClient=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+      backend=supabaseBackend(supabaseClient);ui.mode='shared';ui.share='viewer';ui.role='viewer';ui.canWrite=false;ui.cloudStatus='CONNECTING';ui.cloudReady=false;COLS.forEach(c=>ui.loaded[c]=true);ui.loaded.accounts=true;
+      supabaseClient.auth.onAuthStateChange((_event,session)=>{setTimeout(()=>syncAuthSession(session&&session.user||null).catch(e=>{console.error('EDUNEXUS auth refresh failed',e);ui.authError=e.message||'Authentication could not be refreshed.';render();}),0)});
+      const {data,error}=await supabaseClient.auth.getSession();if(error)throw error;
+      await syncAuthSession(data.session&&data.session.user||null);
+      if(ui.authUser)await completePendingMembership().catch(e=>{console.warn('Pending school setup not finished',e);ui.authError=e.message||'Pending school setup failed.';render();});
+      render();return;
+    }catch(e){console.error('Supabase initialization failed:',e);ui.authError=e.message||'Could not connect to Supabase.';}
   }
-  render();
+  backend=localBackend;ui.mode='local';ui.share='admin';ui.role='admin';ui.canWrite=true;lsLoad();restoreSession();render();
 }
+
 init();
 })();
 </script>
